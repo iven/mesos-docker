@@ -249,9 +249,11 @@ def run_with_settings(image, docker_opts=[], args=[], env={}, ports=[],
         if allocated is None:
             log.warning('Too few ports were allocated to this image.')
             break
-        if target is None:
-            target = allocated
         cmd += [ '-p', '%d:%d' % (allocated, target) ]
+        if target is None:
+            cmd += [ '-p', '%d:%d' % (allocated, allocated) ]
+        else:
+            cmd += [ '-p', '%d:%d' % (allocated, target) ]
     argv = ['docker'] + cmd + docker_opts + [ image ] + [ arg for arg in args ]
     log.info('ARGV ' + ' '.join(str(arg) for arg in argv))
     return subprocess.Popen(argv)
