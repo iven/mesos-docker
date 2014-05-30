@@ -203,7 +203,7 @@ def json_pp(thing):
 
 def ensure_image(f):
     def f_(image, *args, **kwargs):
-        pull_once(image)
+        pull(image)
         return f(image, *args, **kwargs)
     return f_
 
