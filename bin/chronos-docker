@@ -65,8 +65,8 @@ class DockerExecutor(mesos.Executor):
         log.info("Task from Chronos: %s" % self.task_json)
         try:
             img = self.task_json['container']
-            args = self.task_json['cmd']
-            params = self.task_json['params']
+            args = self.task_json['cmd'] rescue ""
+            params = self.task_json['params'] rescue ""
             cmd = run_with_settings(img, args, params)
             self.send_state(mesos_pb2.TASK_RUNNING)
             proc.wait()
@@ -209,6 +209,7 @@ def run_with_settings(image, args, params):
     cmd = ['run', '-cidfile', cidfile]
     argv = ['docker'] + cmd + [params] + [image] + [args]
     new_cmd = ' '.join(str(arg) for arg in argv)
+    log.info("New Cmd: %s" % new_cmd)
     new_args = shlex.split(new_cmd)
     log.info("New Args: %s" % new_args)
     log.info('Docker Command:  ' + ' '.join(str(arg) for arg in argv))
