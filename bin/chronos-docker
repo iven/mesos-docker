@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import traceback
+import shlex
 
 import mesos
 import mesos_pb2
