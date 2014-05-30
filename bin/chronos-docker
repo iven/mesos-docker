@@ -65,8 +65,8 @@ class DockerExecutor(mesos.Executor):
         log.info("Task from Chronos: %s" % self.task_json)
         try:
             img = self.task_json['container']
-            args = self.task_json['cmd'] or ""
-            params = self.task_json['params'] or ""
+            args = self.task_json.get('cmd', "")
+            params = self.task_json.get('params', "")
             cmd = run_with_settings(img, args, params)
             self.send_state(mesos_pb2.TASK_RUNNING)
             proc.wait()
