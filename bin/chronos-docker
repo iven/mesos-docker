@@ -207,7 +207,7 @@ def cleanup_container():
 def run_with_settings(image, args, params):
     global cidfile
     cidfile = '/tmp/docker_cid.' + os.urandom(8).encode('hex')
-    cmd = ['run', '-cidfile', cidfile]
+    cmd = ['run', '--cidfile', cidfile]
     argv = ['docker'] + cmd + [params] + [image] + [args]
     new_cmd = ' '.join(str(arg) for arg in argv)
     log.info("New Cmd: %s" % new_cmd)
