@@ -13,6 +13,7 @@ import threading
 import mesos
 import mesos_pb2
 
+
 def main():
     def handler(signum, _):
         log.info('Exiting due to signal: '+str(signum))
@@ -26,9 +27,12 @@ def main():
     log.info('Ready to serve!')
     exit(0 if driver.run() == mesos_pb2.DRIVER_STOPPED else 1)
 
+
 # This script wraps one and only one container.
 cid = None
 cidfile = None
+
+
 def read_cid():
     global cid
     if cidfile is not None:
@@ -38,6 +42,7 @@ def read_cid():
         except IOError:
             pass
 
+
 log = logging.getLogger('mesos-docker')
 log.setLevel(logging.DEBUG)
 stream_handler = logging.StreamHandler()
@@ -45,17 +50,18 @@ stream_format = logging.Formatter("%(name)s[%(process)d]: %(message)s")
 stream_handler.setFormatter(stream_format)
 log.addHandler(stream_handler)
 
+
 class DockerExecutor(mesos.Executor):
     def __init__(self, args):
-        self.args   = args
-        self.task   = None
+        self.args = args
+        self.task = None
         self.driver = None
-        self.image  = None
+        self.image = None
         self.docker_options = []
         self.runner_thread = None
         self.shutdown_thread = None
-        self.data   = {}
-        self.env    = {}
+        self.data = {}
+        self.env = {}
 
     def run(self):
         global proc
@@ -68,10 +74,10 @@ class DockerExecutor(mesos.Executor):
                 args = self.args[1:]
             else:
                 args = self.args[0:]
-            cpus = [ r.scalar.value for r in resources if r.name == 'cpus' ]
-            megs = [ r.scalar.value for r in resources if r.name == 'mem' ]
-            relative_cpu = [ int(1024 * r)    for r in cpus ] + [ None ]
-            memory_bytes = [ int((2**20) * r) for r in megs ] + [ None ]
+            cpus = [r.scalar.value for r in resources if r.name == 'cpus']
+            megs = [r.scalar.value for r in resources if r.name == 'mem']
+            relative_cpu = [int(1024 * r) for r in cpus] + [None]
+            memory_bytes = [int((2**20) * r) for r in megs] + [None]
             ports = self.allocated_ports()
             proc = run_with_settings(self.image, self.docker_options,
                                      args, self.env, ports,
@@ -95,15 +101,14 @@ class DockerExecutor(mesos.Executor):
 
     def send_state(self, state):
         try:
-            update               = mesos_pb2.TaskStatus()
+            update = mesos_pb2.TaskStatus()
             update.task_id.value = self.task.task_id.value
-            update.state         = state
+            update.state = state
             self.driver.sendStatusUpdate(update)
         except Exception, e:
             log.exception(e)
 
-    #### Mesos Executor API methods ####
-
+    # Mesos Executor API methods
     def registered(self, driver, executorInfo, frameworkInfo, slaveInfo):
         log.info('Registered with Mesos slave')
 
@@ -117,7 +122,7 @@ class DockerExecutor(mesos.Executor):
         if self.task is not None:
             log.error('Executor was reused but this executor is not reuseable')
             exit(2)
-        self.task   = task
+        self.task = task
         self.driver = driver
         log.info('Task is: %s' % task.task_id.value)
         try:
@@ -129,7 +134,8 @@ class DockerExecutor(mesos.Executor):
                     self.env['PORT'+str(i)] = str(port)
             if 'PORT0' in self.env:
                 self.env['PORT'] = self.env['PORT0']
-            if 'env' in self.data: # NB: user-specified PORT* vars override ours
+            if 'env' in self.data:
+                # NB: user-specified PORT* vars override ours
                 self.env.update(self.data['env'])
             if 'container' in self.data:
                 container = self.data['container']
@@ -166,40 +172,46 @@ class DockerExecutor(mesos.Executor):
             self.shutdown_thread.start()
 
     def allocated_ports(self):
-        range_resources = [ _.ranges.range for _ in self.task.resources
-                                                 if _.name == 'ports' ]
+        range_resources = [_.ranges.range for _ in self.task.resources
+                           if _.name == 'ports']
         ranges = itertools.chain(*range_resources)
         # NB: Casting long() to int() so there's no trailing 'L' in later
         #     stringifications. Ports should only ever be shorts, anyways.
-        ports = [ range(int(_.begin), int(_.end)+1) for _ in ranges ]
+        ports = [range(int(_.begin), int(_.end)+1) for _ in ranges]
         return list(itertools.chain(*ports))
 
     def shutdown(self, driver):
         self.cleanup()
 
-# Handles signals, passed as negative numbers, and ensures worker process is
-# cleaned up if it exists.
-#
-# This function shows up in many places but because it's final statement is a
-# call to os._exit() we can be sure it is only ever called one time.
+
 def exit(returncode):
+    """Handles signals, passed as negative numbers, and ensures worker process
+    is cleaned up if it exists.
+
+    This function shows up in many places but because it's final statement is a
+    call to os._exit() we can be sure it is only ever called one time.
+    """
+
     try:
         cleanup_container()
     except Exception, e:
         log.exception(e)
     finally:
-        os._exit( ((-returncode) + 128) if returncode < 0 else returncode )
+        os._exit(((-returncode) + 128) if returncode < 0 else returncode)
+
 
 def json_pp(thing):
     s = json.dumps(thing, indent=2, separators=(',', ': '), sort_keys=True)
     data_lines = s.splitlines()[1:-1]
     return "{ " + '\n'.join([data_lines[0][2:]] + data_lines[1:]) + " }"
 
+
 def ensure_image(f):
     def f_(image, *args, **kwargs):
         pull(image)
         return f(image, *args, **kwargs)
     return f_
+
 
 def try_cid(f):
     def f_(*args, **kwargs):
@@ -208,7 +220,10 @@ def try_cid(f):
         return f(*args, **kwargs)
     return f_
 
-cleaning_up_already = False # Hackish lock.
+
+cleaning_up_already = False  # Hackish lock.
+
+
 @try_cid
 def cleanup_container():
     global cid
@@ -223,18 +238,19 @@ def cleanup_container():
         cid = None
         cidfile = None
 
+
 @ensure_image
 def run_with_settings(image, docker_opts=[], args=[], env={}, ports=[],
                       relative_cpu=None, memory_bytes=None):
     global cidfile
     cidfile = '/tmp/docker_cid.' + os.urandom(8).encode('hex')
-    cmd     = [ 'run', '--cidfile', cidfile ]
+    cmd = ['run', '--cidfile', cidfile]
     if relative_cpu is not None:
-        cmd += [ '-c', str(relative_cpu) ]
+        cmd += ['-c', str(relative_cpu)]
     if memory_bytes is not None:
-        cmd += [ '-m', str(memory_bytes) ]
+        cmd += ['-m', str(memory_bytes)]
     for k, v in env.items():
-        cmd += [ '-e', '%s=%s' % (k,v) ]
+        cmd += ['-e', '%s=%s' % (k, v)]
     log.info('Mesos ports: ' + str(ports))
     docker_ports = inner_ports(image)
     log.info('Docker ports: ' + str(docker_ports))
@@ -244,10 +260,10 @@ def run_with_settings(image, docker_opts=[], args=[], env={}, ports=[],
             log.warning('Too few ports were allocated to this image.')
             break
         if target is None:
-            cmd += [ '-p', '%d:%d' % (allocated, allocated) ]
+            cmd += ['-p', '%d:%d' % (allocated, allocated)]
         else:
-            cmd += [ '-p', '%d:%d' % (allocated, target) ]
-    argv = ['docker'] + cmd + docker_opts + [ image ] + [ arg for arg in args ]
+            cmd += ['-p', '%d:%d' % (allocated, target)]
+    argv = ['docker'] + cmd + docker_opts + [image] + [arg for arg in args]
     log.info('ARGV ' + ' '.join(str(arg) for arg in argv))
     return subprocess.Popen(argv)
 
@@ -264,9 +280,10 @@ except:
         return stdout
     subprocess.check_output = check_output
 
+
 @ensure_image
 def inner_ports(image):
-    text   = subprocess.check_output(['docker', 'inspect', image])
+    text = subprocess.check_output(['docker', 'inspect', image])
     parsed = json.loads(text)[0]
     config = None
     if 'Config' in parsed:
@@ -276,19 +293,22 @@ def inner_ports(image):
     if config:
         exposed = config.get('ExposedPorts', {})
         if exposed and isinstance(exposed, dict):
-            return sorted( int(k.split('/')[0]) for k in exposed.keys() )
+            return sorted(int(k.split('/')[0]) for k in exposed.keys())
         specs = config.get('PortSpecs', [])
         if specs and isinstance(specs, list):
-            return sorted( int(v.split(':')[-1]) for v in specs )
-    return [] # If all else fails...
+            return sorted(int(v.split(':')[-1]) for v in specs)
+    return []  # If all else fails...
+
 
 def pull(image):
     subprocess.check_call(['docker', 'pull', image])
     refresh_docker_image_info(image)
 
+
 def pull_once(image):
     if not image_info(image):
         pull(image)
+
 
 def image_info(image):
     if image in images:
@@ -296,11 +316,14 @@ def image_info(image):
     else:
         return refresh_docker_image_info(image)
 
+
 images = {}
+
+
 def refresh_docker_image_info(image):
-    delim   = re.compile('  +')
-    text    = subprocess.check_output(['docker', 'images', image])
-    records = [ delim.split(line) for line in text.splitlines() ]
+    delim = re.compile('  +')
+    text = subprocess.check_output(['docker', 'images', image])
+    records = [delim.split(line) for line in text.splitlines()]
     for record in records:
         if record[0] == image:
             images[image] = image
