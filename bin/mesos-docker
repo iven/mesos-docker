@@ -18,138 +18,8 @@ import mesos_pb2
 cid = None
 cidfile = None
 
-
-class DockerExecutor(mesos.Executor):
-    def __init__(self, args):
-        self.args = args
-        self.task = None
-        self.driver = None
-        self.image = None
-        self.docker_options = []
-        self.runner_thread = None
-        self.shutdown_thread = None
-        self.data = {}
-        self.env = {}
-
-    def run(self):
-        global proc
-        exitcode = 2
-        finalstate = mesos_pb2.TASK_FAILED
-        resources = self.task.resources
-        try:
-            if self.image is None:
-                self.image = self.args[0]
-                args = self.args[1:]
-            else:
-                args = self.args[0:]
-            cpus = [r.scalar.value for r in resources if r.name == 'cpus']
-            megs = [r.scalar.value for r in resources if r.name == 'mem']
-            relative_cpu = [int(1024 * r) for r in cpus] + [None]
-            memory_bytes = [int((2**20) * r) for r in megs] + [None]
-            ports = self.allocated_ports()
-            proc = run_with_settings(self.image, self.docker_options,
-                                     args, self.env, ports,
-                                     relative_cpu[0], memory_bytes[0])
-            self.send_state(mesos_pb2.TASK_RUNNING)
-            proc.wait()
-            logging.info('Container exited with code: %d' % proc.returncode)
-            exitcode = proc.returncode
-            if proc.returncode == 0:
-                finalstate = mesos_pb2.TASK_FINISHED
-            else:
-                if self.shutdown_thread:
-                    finalstate = mesos_pb2.TASK_KILLED
-                else:
-                    finalstate = mesos_pb2.TASK_FAILED
-        except Exception, e:
-            logging.exception(e)
-        finally:
-            self.send_state(finalstate)
-            exit(exitcode)
-
-    def send_state(self, state):
-        try:
-            update = mesos_pb2.TaskStatus()
-            update.task_id.value = self.task.task_id.value
-            update.state = state
-            self.driver.sendStatusUpdate(update)
-        except Exception, e:
-            logging.exception(e)
-
-    # Mesos Executor API methods
-    def registered(self, driver, executorInfo, frameworkInfo, slaveInfo):
-        logging.info('Registered with Mesos slave')
-
-    def reregistered(driver, slaveInfo):
-        logging.info('Reregistered with Mesos slave')
-
-    def disconnected(driver):
-        logging.warning('Disconnected from Mesos slave')
-
-    def launchTask(self, driver, task):
-        if self.task is not None:
-            logging.error('Executor was reused but this executor is not reuseable')
-            exit(2)
-        self.task = task
-        self.driver = driver
-        logging.info('Task is: %s' % task.task_id.value)
-        try:
-            self.data = json.loads(task.data) if task.data else {}
-            for line in json_pp(self.data).splitlines():
-                logging.info(line)
-            for i, port in enumerate(self.allocated_ports()):
-                if port != 0:
-                    self.env['PORT'+str(i)] = str(port)
-            if 'PORT0' in self.env:
-                self.env['PORT'] = self.env['PORT0']
-            if 'env' in self.data:
-                # NB: user-specified PORT* vars override ours
-                self.env.update(self.data['env'])
-            if 'container' in self.data:
-                container = self.data['container']
-                m = re.match(r'^docker:///(.+)$', container['image'])
-                if m is None:
-                    raise ValueError('container.image must be a docker:/// URL')
-                self.image = m.group(1)
-                self.docker_options = container['options']
-            for k, v in self.env.items():
-                os.environ[k] = str(v)
-        except Exception, e:
-            logging.error('JSON from framework is rubbish')
-            logging.exception(e)
-        try:
-            self.run_thread = threading.Thread(target=self.run)
-            self.run_thread.daemon = True
-            self.run_thread.start()
-        except Exception, e:
-            logging.exception(e)
-            self.send_state(mesos_pb2.TASK_FAILED)
-            exit(2)
-
-    def killTask(self, driver, task_id):
-        if self.task.task_id.value == task_id.value:
-            logging.info('Asked to shutdown managed task %s' % task_id.value)
-            self.cleanup()
-        else:
-            logging.info('Asked to shutdown unknown task %s' % task_id.value)
-
-    def cleanup(self):
-        if self.shutdown_thread is None:
-            self.shutdown_thread = threading.Thread(target=cleanup_container)
-            self.shutdown_thread.daemon = True
-            self.shutdown_thread.start()
-
-    def allocated_ports(self):
-        range_resources = [_.ranges.range for _ in self.task.resources
-                           if _.name == 'ports']
-        ranges = itertools.chain(*range_resources)
-        # NB: Casting long() to int() so there's no trailing 'L' in later
-        #     stringifications. Ports should only ever be shorts, anyways.
-        ports = [range(int(_.begin), int(_.end)+1) for _ in ranges]
-        return list(itertools.chain(*ports))
-
-    def shutdown(self, driver):
-        self.cleanup()
+# Hackish lock for cleaning up
+cleaning_up_already = False
 
 
 def json_pp(thing):
@@ -160,15 +30,15 @@ def json_pp(thing):
 
 def ensure_image(f):
     def f_(image, *args, **kwargs):
-        pull(image)
+        subprocess.check_call(['docker', 'pull', image])
         return f(image, *args, **kwargs)
     return f_
 
 
 def try_cid(f):
     def f_(*args, **kwargs):
+        global cid
         if cid is None:
-            global cid
             if cidfile is not None:
                 try:
                     with open(cidfile) as file_:
@@ -177,9 +47,6 @@ def try_cid(f):
                     pass
         return f(*args, **kwargs)
     return f_
-
-
-cleaning_up_already = False  # Hackish lock.
 
 
 @try_cid
@@ -251,34 +118,138 @@ def inner_ports(image):
     return []  # If all else fails...
 
 
-def pull(image):
-    subprocess.check_call(['docker', 'pull', image])
-    refresh_docker_image_info(image)
+class DockerExecutor(mesos.Executor):
+    def __init__(self, args):
+        self.args = args
+        self.task = None
+        self.driver = None
+        self.image = None
+        self.docker_options = []
+        self.runner_thread = None
+        self.shutdown_thread = None
+        self.data = {}
+        self.env = {}
 
+    def run(self):
+        global proc
+        exitcode = 2
+        finalstate = mesos_pb2.TASK_FAILED
+        resources = self.task.resources
+        try:
+            if self.image is None:
+                self.image = self.args[0]
+                args = self.args[1:]
+            else:
+                args = self.args[0:]
+            cpus = [r.scalar.value for r in resources if r.name == 'cpus']
+            megs = [r.scalar.value for r in resources if r.name == 'mem']
+            relative_cpu = [int(1024 * r) for r in cpus] + [None]
+            memory_bytes = [int((2**20) * r) for r in megs] + [None]
+            ports = self.allocated_ports()
+            proc = run_with_settings(self.image, self.docker_options,
+                                     args, self.env, ports,
+                                     relative_cpu[0], memory_bytes[0])
+            self.send_state(mesos_pb2.TASK_RUNNING)
+            proc.wait()
+            logging.info('Container exited with code: %d' % proc.returncode)
+            exitcode = proc.returncode
+            if proc.returncode == 0:
+                finalstate = mesos_pb2.TASK_FINISHED
+            else:
+                if self.shutdown_thread:
+                    finalstate = mesos_pb2.TASK_KILLED
+                else:
+                    finalstate = mesos_pb2.TASK_FAILED
+        except Exception, e:
+            logging.exception(e)
+        finally:
+            self.send_state(finalstate)
+            exit(exitcode)
 
-def pull_once(image):
-    if not image_info(image):
-        pull(image)
+    def send_state(self, state):
+        try:
+            update = mesos_pb2.TaskStatus()
+            update.task_id.value = self.task.task_id.value
+            update.state = state
+            self.driver.sendStatusUpdate(update)
+        except Exception, e:
+            logging.exception(e)
 
+    # Mesos Executor API methods
+    def registered(self, driver, executorInfo, frameworkInfo, slaveInfo):
+        logging.info('Registered with Mesos slave')
 
-def image_info(image):
-    if image in images:
-        return images[image]
-    else:
-        return refresh_docker_image_info(image)
+    def reregistered(driver, slaveInfo):
+        logging.info('Reregistered with Mesos slave')
 
+    def disconnected(driver):
+        logging.warning('Disconnected from Mesos slave')
 
-images = {}
+    def launchTask(self, driver, task):
+        if self.task is not None:
+            logging.error('Executor was reused but " \
+                          "this executor is not reuseable')
+            exit(2)
+        self.task = task
+        self.driver = driver
+        logging.info('Task is: %s' % task.task_id.value)
+        try:
+            self.data = json.loads(task.data) if task.data else {}
+            for line in json_pp(self.data).splitlines():
+                logging.info(line)
+            for i, port in enumerate(self.allocated_ports()):
+                if port != 0:
+                    self.env['PORT'+str(i)] = str(port)
+            if 'PORT0' in self.env:
+                self.env['PORT'] = self.env['PORT0']
+            if 'env' in self.data:
+                # NB: user-specified PORT* vars override ours
+                self.env.update(self.data['env'])
+            if 'container' in self.data:
+                container = self.data['container']
+                m = re.match(r'^docker:///(.+)$', container['image'])
+                if m is None:
+                    raise ValueError('container.image must be a docker:/// URL')
+                self.image = m.group(1)
+                self.docker_options = container['options']
+            for k, v in self.env.items():
+                os.environ[k] = str(v)
+        except Exception, e:
+            logging.error('JSON from framework is rubbish')
+            logging.exception(e)
+        try:
+            self.run_thread = threading.Thread(target=self.run)
+            self.run_thread.daemon = True
+            self.run_thread.start()
+        except Exception, e:
+            logging.exception(e)
+            self.send_state(mesos_pb2.TASK_FAILED)
+            exit(2)
 
+    def killTask(self, driver, task_id):
+        if self.task.task_id.value == task_id.value:
+            logging.info('Asked to shutdown managed task %s' % task_id.value)
+            self.cleanup()
+        else:
+            logging.info('Asked to shutdown unknown task %s' % task_id.value)
 
-def refresh_docker_image_info(image):
-    delim = re.compile('  +')
-    text = subprocess.check_output(['docker', 'images', image])
-    records = [delim.split(line) for line in text.splitlines()]
-    for record in records:
-        if record[0] == image:
-            images[image] = image
-            return record
+    def cleanup(self):
+        if self.shutdown_thread is None:
+            self.shutdown_thread = threading.Thread(target=cleanup_container)
+            self.shutdown_thread.daemon = True
+            self.shutdown_thread.start()
+
+    def allocated_ports(self):
+        range_resources = [_.ranges.range for _ in self.task.resources
+                           if _.name == 'ports']
+        ranges = itertools.chain(*range_resources)
+        # NB: Casting long() to int() so there's no trailing 'L' in later
+        #     stringifications. Ports should only ever be shorts, anyways.
+        ports = [range(int(_.begin), int(_.end)+1) for _ in ranges]
+        return list(itertools.chain(*ports))
+
+    def shutdown(self, driver):
+        self.cleanup()
 
 
 def init_signal_handlers():
