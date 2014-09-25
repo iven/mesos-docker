@@ -131,7 +131,6 @@ class DockerExecutor(mesos.Executor):
         self.env = {}
 
     def run(self):
-        global proc
         exitcode = 2
         finalstate = mesos_pb2.TASK_FAILED
         resources = self.task.resources
@@ -199,7 +198,7 @@ class DockerExecutor(mesos.Executor):
                 logging.info(line)
             for i, port in enumerate(self.allocated_ports()):
                 if port != 0:
-                    self.env['PORT'+str(i)] = str(port)
+                    self.env['PORT{}'.format(i)] = str(port)
             if 'PORT0' in self.env:
                 self.env['PORT'] = self.env['PORT0']
             if 'env' in self.data:
@@ -231,7 +230,7 @@ class DockerExecutor(mesos.Executor):
             logging.info('Asked to shutdown managed task %s' % task_id.value)
             self.cleanup()
         else:
-            logging.info('Asked to shutdown unknown task %s' % task_id.value)
+            logging.warning('Asked to shutdown unknown task %s' % task_id.value)
 
     def cleanup(self):
         if self.shutdown_thread is None:
