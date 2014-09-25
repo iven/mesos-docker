@@ -13,21 +13,6 @@ import threading
 import mesos
 import mesos_pb2
 
-
-def main():
-    def handler(signum, _):
-        log.info('Exiting due to signal: '+str(signum))
-        exit(-signum)
-    signal.signal(signal.SIGINT,  handler)
-    signal.signal(signal.SIGTERM, handler)
-    signal.signal(signal.SIGABRT, handler)
-    signal.signal(signal.SIGPIPE, handler)
-    signal.signal(signal.SIGSEGV, handler)
-    driver = mesos.MesosExecutorDriver(DockerExecutor(sys.argv[1:]))
-    log.info('Ready to serve!')
-    exit(0 if driver.run() == mesos_pb2.DRIVER_STOPPED else 1)
-
-
 # This script wraps one and only one container.
 cid = None
 cidfile = None
@@ -184,22 +169,6 @@ class DockerExecutor(mesos.Executor):
         self.cleanup()
 
 
-def exit(returncode):
-    """Handles signals, passed as negative numbers, and ensures worker process
-    is cleaned up if it exists.
-
-    This function shows up in many places but because it's final statement is a
-    call to os._exit() we can be sure it is only ever called one time.
-    """
-
-    try:
-        cleanup_container()
-    except Exception, e:
-        log.exception(e)
-    finally:
-        os._exit(((-returncode) + 128) if returncode < 0 else returncode)
-
-
 def json_pp(thing):
     s = json.dumps(thing, indent=2, separators=(',', ': '), sort_keys=True)
     data_lines = s.splitlines()[1:-1]
@@ -229,7 +198,13 @@ def cleanup_container():
     global cid
     global cidfile
     global cleaning_up_already
-    if cid is not None and not cleaning_up_already:
+
+    log.info("Beginning to cleanup container.")
+    if cid is None:
+        log.warning("CID is None.")
+    elif cleaning_up_already:
+        log.warning("Already doing cleanup, skipping.")
+    else:
         cleaning_up_already = True
         log.info('Cleaning up container %s' % cid)
         subprocess.check_call(['docker', 'stop', '-t=2', cid])
@@ -329,5 +304,38 @@ def refresh_docker_image_info(image):
             images[image] = image
             return record
 
+
+def init_signal_handlers():
+    def handler(signum, _):
+        log.info('Exiting due to signal: {}'.format(signum))
+        exit(-signum)
+
+    signal.signal(signal.SIGINT, handler)
+    signal.signal(signal.SIGTERM, handler)
+    signal.signal(signal.SIGABRT, handler)
+    signal.signal(signal.SIGPIPE, handler)
+    signal.signal(signal.SIGSEGV, handler)
+
+
+def exit(returncode):
+    """Handles signals, passed as negative numbers, and ensures worker
+    process is cleaned up if it exists.
+
+    This function shows up in many places but because it's final
+    statement is a call to os._exit() we can be sure it is only ever
+    called one time.
+    """
+    try:
+        cleanup_container()
+    except Exception, e:
+        log.exception(e)
+    finally:
+        os._exit(((-returncode) + 128) if returncode < 0 else returncode)
+
+
 if __name__ == '__main__':
-    main()
+    init_signal_handlers()
+
+    driver = mesos.MesosExecutorDriver(DockerExecutor(sys.argv[1:]))
+    log.info('Ready to serve!')
+    exit(0 if driver.run() == mesos_pb2.DRIVER_STOPPED else 1)
