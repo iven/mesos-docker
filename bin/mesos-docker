@@ -125,7 +125,7 @@ class DockerExecutor(mesos.Executor):
         self.driver = None
         self.image = None
         self.docker_options = []
-        self.runner_thread = None
+        self.run_thread = None
         self.shutdown_thread = None
         self.data = {}
         self.env = {}
