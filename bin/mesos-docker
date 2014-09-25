@@ -9,8 +9,6 @@ import signal
 import subprocess
 import sys
 import threading
-import time
-import traceback
 
 import mesos
 import mesos_pb2
@@ -90,7 +88,7 @@ class DockerExecutor(mesos.Executor):
                 else:
                     finalstate = mesos_pb2.TASK_FAILED
         except Exception, e:
-            log_exc()
+            log.exception(e)
         finally:
             self.send_state(finalstate)
             exit(exitcode)
@@ -102,7 +100,7 @@ class DockerExecutor(mesos.Executor):
             update.state         = state
             self.driver.sendStatusUpdate(update)
         except Exception, e:
-            log_exc()
+            log.exception(e)
 
     #### Mesos Executor API methods ####
 
@@ -144,13 +142,13 @@ class DockerExecutor(mesos.Executor):
                 os.environ[k] = str(v)
         except Exception, e:
             log.error('JSON from framework is rubbish')
-            log_exc()
+            log.exception(e)
         try:
             self.run_thread = threading.Thread(target=self.run)
             self.run_thread.daemon = True
             self.run_thread.start()
         except Exception, e:
-            log_exc()
+            log.exception(e)
             self.send_state(mesos_pb2.TASK_FAILED)
             exit(2)
 
@@ -188,13 +186,9 @@ def exit(returncode):
     try:
         cleanup_container()
     except Exception, e:
-        log_exc()
+        log.exception(e)
     finally:
         os._exit( ((-returncode) + 128) if returncode < 0 else returncode )
-
-def log_exc():
-    for line in traceback.format_exc().splitlines():
-        log.error(line)
 
 def json_pp(thing):
     s = json.dumps(thing, indent=2, separators=(',', ': '), sort_keys=True)
