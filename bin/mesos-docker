@@ -1,4 +1,5 @@
 #!/usr/bin/env python2.7
+
 import itertools
 import json
 import logging
@@ -16,16 +17,6 @@ import mesos_pb2
 # Container ID (This script wraps one and only one container)
 cid = None
 cidfile = None
-
-
-def read_cid():
-    global cid
-    if cidfile is not None:
-        try:
-            with open(cidfile) as f:
-                cid = f.read().strip()
-        except IOError:
-            pass
 
 
 class DockerExecutor(mesos.Executor):
@@ -177,7 +168,13 @@ def ensure_image(f):
 def try_cid(f):
     def f_(*args, **kwargs):
         if cid is None:
-            read_cid()
+            global cid
+            if cidfile is not None:
+                try:
+                    with open(cidfile) as file_:
+                        cid = file_.read().strip()
+                except IOError:
+                    pass
         return f(*args, **kwargs)
     return f_
 
