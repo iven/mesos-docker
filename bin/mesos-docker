@@ -23,9 +23,7 @@ cleaning_up_already = False
 
 
 def json_pp(thing):
-    s = json.dumps(thing, indent=2, separators=(',', ': '), sort_keys=True)
-    data_lines = s.splitlines()[1:-1]
-    return "{ " + '\n'.join([data_lines[0][2:]] + data_lines[1:]) + " }"
+    return json.dumps(thing, indent=2, separators=(',', ': '), sort_keys=True)
 
 
 def ensure_image(f):
@@ -195,8 +193,7 @@ class DockerExecutor(mesos.Executor):
         logging.info('Task is: %s' % task.task_id.value)
         try:
             self.data = json.loads(task.data) if task.data else {}
-            for line in json_pp(self.data).splitlines():
-                logging.info(line)
+            logging.info(json_pp(self.data))
             for i, port in enumerate(self.allocated_ports()):
                 if port != 0:
                     self.env['PORT{}'.format(i)] = str(port)
