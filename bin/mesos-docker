@@ -157,6 +157,7 @@ class DockerExecutor(mesos.Executor):
             else:
                 if self.shutdown_thread:
                     finalstate = mesos_pb2.TASK_KILLED
+                    exitcode = 0
                 else:
                     finalstate = mesos_pb2.TASK_FAILED
         except Exception, e:
