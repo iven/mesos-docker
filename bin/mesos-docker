@@ -7,6 +7,7 @@ import logging.handlers
 import os
 import re
 import signal
+import sys
 import subprocess
 import threading
 
@@ -22,10 +23,12 @@ def json_pp(thing):
 
 
 class DockerExecutor(mesos.Executor):
-    def __init__(self):
+    def __init__(self, argv):
         self._driver = None
         self._task = None
         self._task_data = None
+
+        self._argv = argv
 
         self._container_data = None
         self._image = None
@@ -251,6 +254,8 @@ class DockerExecutor(mesos.Executor):
         # Image name
         cmd.append(self.image)
 
+        cmd.extend(self._argv)
+
         return cmd
 
     def _run(self):
@@ -415,7 +420,7 @@ if __name__ == '__main__':
     init_signal_handlers()
 
     global executor
-    executor = DockerExecutor()
+    executor = DockerExecutor(sys.argv[1:])
     driver = mesos.MesosExecutorDriver(executor)
     logging.info('Ready to serve!')
 
