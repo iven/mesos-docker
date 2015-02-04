@@ -7,6 +7,7 @@ import logging.handlers
 import os
 import re
 import signal
+import socket
 import sys
 import subprocess
 import threading
@@ -200,6 +201,7 @@ class DockerExecutor(Executor):
         """Get all environment variables exported into Docker container."""
         if self._docker_env is None:
             env = {}
+            env['HOST'] = socket.gethostname()
             for i, port in enumerate(self.allocated_ports):
                 if port != 0:
                     env['PORT{}'.format(i)] = str(port)
