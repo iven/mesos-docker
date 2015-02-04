@@ -11,8 +11,12 @@ import sys
 import subprocess
 import threading
 
-import mesos
-import mesos_pb2
+try:
+    from mesos.native import MesosExecutorDriver
+    from mesos.interface import Executor, mesos_pb2
+except ImportError:
+    from mesos import Executor, MesosExecutorDriver
+    import mesos_pb2
 
 # We have to use executor.start_cleanup_thread() globally
 executor = None
@@ -22,7 +26,7 @@ def json_pp(thing):
     return json.dumps(thing, indent=2, separators=(',', ': '), sort_keys=True)
 
 
-class DockerExecutor(mesos.Executor):
+class DockerExecutor(Executor):
     def __init__(self, argv):
         self._driver = None
         self._task = None
@@ -193,7 +197,7 @@ class DockerExecutor(mesos.Executor):
 
     @property
     def docker_env(self):
-        """Get all environment varibles exported into Docker container."""
+        """Get all environment variables exported into Docker container."""
         if self._docker_env is None:
             env = {}
             for i, port in enumerate(self.allocated_ports):
@@ -421,7 +425,7 @@ if __name__ == '__main__':
 
     global executor
     executor = DockerExecutor(sys.argv[1:])
-    driver = mesos.MesosExecutorDriver(executor)
+    driver = MesosExecutorDriver(executor)
     logging.info('Ready to serve!')
 
     exit(0 if driver.run() == mesos_pb2.DRIVER_STOPPED else 1)
